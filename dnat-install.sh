@@ -25,8 +25,14 @@ if [ "$(echo  $remotehost |grep -E -o '([0-9]{1,3}[\.]){3}[0-9]{1,3}')" != "" ];
     exit 1
 fi
 
+echo "正在安装依赖...."
+yum install -y bind-utils &> /dev/null
+apt install -y dnsutils &> /dev/null
+echo "Completed：依赖安装完毕"
+echo ""
+
 mkdir /etc/dnat
-cat > /etc/dnat/dnat.conf <<EOF
+cat > /etc/dnat/$localport.conf <<EOF
 #本地端口号
 localport=$localport
 #远程端口号
@@ -78,12 +84,6 @@ if [ "$(echo  $remotehost |grep -E -o '([0-9]{1,3}[\.]){3}[0-9]{1,3}')" != "" ];
     exit 1
 fi
 
-echo "正在安装依赖...."
-yum install -y bind-utils &> /dev/null
-apt install -y dnsutils &> /dev/null
-echo "Completed：依赖安装完毕"
-echo ""
-
 # 开启端口转发
 echo "1.端口转发开启  【成功】"
 sed -n '/^net.ipv4.ip_forward=1/'p /etc/sysctl.conf | grep -q "net.ipv4.ip_forward=1"
@@ -115,7 +115,7 @@ echo ""
 
 while true ;
 do
-    remote=$(host -t a  $remotehost|grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}")
+    remote=$(host -t a  $remotehost|grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}"|head -1)
     if [ "$remote" = "" ];then
         echo -e "${red}无法解析remotehost，请填写正确的remotehost！${black}"
         exit 1
@@ -160,7 +160,7 @@ do
 done;
 EOF
 
-cat > /lib/systemd/system/dnat.service <<\EOF
+cat > /lib/systemd/system/dnat$localport.service <<\EOF
 [Unit]
 Description=动态设置iptables转发规则
 After=network-online.target
@@ -168,7 +168,7 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=/root/
-EnvironmentFile=/etc/dnat/dnat.conf
+EnvironmentFile=
 ExecStart=/bin/bash /usr/local/bin/dnat.sh $localport $remoteport $remotehost
 Restart=always
 RestartSec=30
@@ -177,10 +177,12 @@ RestartSec=30
 WantedBy=multi-user.target
 EOF
 
+sed -i "s/EnvironmentFile=/EnvironmentFile=\/etc\/dnat\/$localport.conf/g" /lib/systemd/system/dnat$localport.service
+
 systemctl daemon-reload
-systemctl enable dnat
-service dnat stop
-service dnat start
+systemctl enable dnat$localport
+service dnat$localport stop
+service dnat$localport start
 
 echo  "已设置转发规则：本地端口[$localport]=>[$remotehost:$remoteport]"
-echo  "输入 journalctl -exu dnat 查看日志"
+echo  -e "输入 ${red}journalctl -exu dnat$localport${black} 查看日志"
